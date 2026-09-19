@@ -48,13 +48,37 @@ The frontend targets `http://localhost:8000` by default; set
 ## Verify
 
 ```bash
-cd wayfinder/backend
+cd backend
 .venv/bin/python -m pytest
 ```
 
 The `tests/golden_set/` directory contains the three running scenarios from
 the specification: notice-to-vacate, freelance-contract redraft, and
 arbitration opt-out.
+
+## Deploy for Free
+
+The repository contains a multi-stage `Dockerfile` and `render.yaml` configured to build the React SPA and serve it directly from FastAPI as a unified full-stack service with 0 extra configuration.
+
+### Option 1: Render.com (100% Free, 1-Click)
+1. Go to [dashboard.render.com](https://dashboard.render.com) and sign in with GitHub (Free, no credit card required).
+2. Click **New +** → **Web Service**.
+3. Select your repository `https://github.com/namanraii/WayFinder`.
+4. Render will detect the `Dockerfile` automatically. Select the **Free** instance type and click **Deploy Web Service**.
+5. Once built, your app will be live at `https://wayfinder-xxxx.onrender.com`.
+
+### Option 2: Koyeb / Railway / Fly.io (Free Tier)
+1. Import `https://github.com/namanraii/WayFinder.git`.
+2. Select Docker deployment (it will use the root `Dockerfile` on port `8080`).
+
+### Option 3: Google Cloud Run (Free Tier)
+```bash
+gcloud run deploy wayfinder \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated
+```
+
 
 ## Safety design
 
