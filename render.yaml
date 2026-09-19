@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: wayfinder
+    runtime: docker
+    plan: free
+    dockerfilePath: Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: WAYFINDER_LLM_PROVIDER
+        value: stub
