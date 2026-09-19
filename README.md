@@ -2,6 +2,16 @@
 
 > Don't summarize the document. Show me my move.
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Wayfinder%20App-0D9488?style=for-the-badge&logo=render)](https://wayfinder-vpyc.onrender.com)
+[![API Docs](https://img.shields.io/badge/FastAPI-Docs-009688?style=for-the-badge&logo=fastapi)](https://wayfinder-vpyc.onrender.com/docs)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+
+- **Live Application**: [https://wayfinder-vpyc.onrender.com](https://wayfinder-vpyc.onrender.com)
+- **API Documentation**: [https://wayfinder-vpyc.onrender.com/docs](https://wayfinder-vpyc.onrender.com/docs)
+- **Health Check**: [https://wayfinder-vpyc.onrender.com/health](https://wayfinder-vpyc.onrender.com/health)
+
+---
+
 Wayfinder turns a document into a ranked **Decision Record**: the real choices
 it creates, their deadlines, the documented consequence of doing nothing, and
 the safest next step. It is an information and preparation tool, not a source
