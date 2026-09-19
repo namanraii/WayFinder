@@ -1,0 +1,6 @@
+{
+  "scenario": "arbitration_optout",
+  "minimum_decision_count": 1,
+  "expected_clause_types": ["arbitration_optout"],
+  "required_inaction_phrase": "binding arbitration"
+}

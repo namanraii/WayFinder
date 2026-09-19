@@ -1,0 +1,10 @@
+{
+  "name": "Wayfinder",
+  "short_name": "Wayfinder",
+  "description": "Understand the decisions a legal document asks you to make.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f7f6f0",
+  "theme_color": "#1f4d3a",
+  "icons": []
+}

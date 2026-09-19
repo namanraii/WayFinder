@@ -1,0 +1,10 @@
+To: [landlord_name]
+From: [tenant_name]
+Date: [date]
+Re: Request for itemized security-deposit accounting
+
+Please provide an itemized accounting of deductions from the deposit of
+[deposit_amount] following my move-out on [move_out_date].
+
+Sincerely,
+[tenant_name]

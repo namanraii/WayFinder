@@ -1,0 +1,12 @@
+To: [recipient]
+From: [sender]
+Date: [date]
+Re: Formal notice effective [effective_date]
+
+This letter provides notice effective [effective_date].
+[reason]
+
+Please confirm receipt.
+
+Sincerely,
+[sender]

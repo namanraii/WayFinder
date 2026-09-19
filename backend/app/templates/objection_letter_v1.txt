@@ -1,0 +1,13 @@
+To: [authority_name]
+From: [tenant_name]
+Date: [date]
+Re: Objection to notice dated [notice_date]
+
+I am writing to object to the notice identified above. My understanding is:
+[objection_grounds]
+
+Please confirm receipt of this objection and the next available process for
+reviewing it.
+
+Sincerely,
+[tenant_name]

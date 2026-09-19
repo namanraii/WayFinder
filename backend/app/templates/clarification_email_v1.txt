@@ -1,0 +1,10 @@
+To: [recipient]
+Subject: Clarification requested — [clause_reference]
+
+Hello [recipient],
+
+Please clarify the following point in [clause_reference]:
+[specific_question]
+
+Thank you,
+[sender_name]

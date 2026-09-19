@@ -1,0 +1,7 @@
+{
+  "scenario": "freelance_contract_redraft",
+  "expected_changes": [
+    {"clause_type": "payment_dispute", "risk_delta": "increased"},
+    {"clause_type": "general", "status": "removed"}
+  ]
+}

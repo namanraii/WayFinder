@@ -1,0 +1,9 @@
+To: [service_name]
+From: [account_identifier]
+Date: [date]
+Re: Arbitration opt-out
+
+I am exercising the arbitration opt-out described in your terms. This request
+relates to account [account_identifier] and is submitted before [opt_out_deadline].
+
+Please confirm receipt.

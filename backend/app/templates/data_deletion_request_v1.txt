@@ -1,0 +1,9 @@
+To: [service_name]
+From: [account_identifier]
+Date: [date]
+Re: Data deletion request
+
+Please delete personal data associated with [account_identifier].
+[applicable_regulation_reference]
+
+Please confirm completion or explain any retained data and the reason for it.

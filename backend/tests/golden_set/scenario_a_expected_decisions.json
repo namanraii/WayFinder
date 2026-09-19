@@ -1,0 +1,7 @@
+{
+  "scenario": "eviction_notice",
+  "minimum_decision_count": 1,
+  "expected_clause_types": ["notice_period"],
+  "required_inaction_phrase": "deemed accepted",
+  "expected_triage_tier": "lawyer_now"
+}

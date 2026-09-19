@@ -1,0 +1,7 @@
+PLATFORM TERMS OF SERVICE
+
+14. Arbitration Opt-Out. You may opt out of binding arbitration by sending a
+written notice within 30 days of accepting these Terms. If you do not opt out
+within that period, disputes will be resolved through binding arbitration.
+
+15. Governing Law. These Terms are governed by the laws of California.
