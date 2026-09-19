@@ -139,6 +139,16 @@ CREATE TABLE IF NOT EXISTS generation_audit_log (
   guardrail_checks_passed TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_clauses_doc_id ON clauses(document_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_doc_id ON decisions(document_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_tier ON decisions(triage_tier);
+CREATE INDEX IF NOT EXISTS idx_artifacts_dec_id ON resolution_artifacts(decision_id);
+CREATE INDEX IF NOT EXISTS idx_preppacks_dec_id ON prep_packs(decision_id);
+CREATE INDEX IF NOT EXISTS idx_tracker_dec_id ON deadline_tracker(decision_id);
+CREATE INDEX IF NOT EXISTS idx_tracker_status ON deadline_tracker(status);
+CREATE INDEX IF NOT EXISTS idx_qa_doc_id ON qa_log(document_id);
+CREATE INDEX IF NOT EXISTS idx_graph_nodes_doc ON graph_nodes(document_id);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_doc ON graph_edges(document_id);
 """
 
 
@@ -152,9 +162,13 @@ def init_db(db_path: Optional[Path] = None) -> None:
 
 
 def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path or DB_PATH))
+    conn = sqlite3.connect(str(db_path or DB_PATH), timeout=20.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA cache_size = -64000")
+    conn.execute("PRAGMA temp_store = MEMORY")
     return conn
 
 

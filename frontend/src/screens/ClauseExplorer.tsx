@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { demoClauses } from "../api/demo";
 import type { Clause } from "../api/types";
@@ -42,6 +42,26 @@ export function ClauseExplorerScreen({ documentId }: { documentId: string }) {
     };
   }, [documentId]);
 
+  const clauseTypes = useMemo(
+    () => Array.from(new Set(clauses.map((c) => c.clause_type))).sort(),
+    [clauses],
+  );
+
+  const filteredClauses = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return clauses.filter((c) => {
+      if (filterType !== "all" && c.clause_type !== filterType) return false;
+      if (q) {
+        const match =
+          (c.clause_title || "").toLowerCase().includes(q) ||
+          (c.plain_language || "").toLowerCase().includes(q) ||
+          c.original_text.toLowerCase().includes(q);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [clauses, filterType, searchQuery]);
+
   if (isLoading) {
     return <LoadingState label="Loading extracted document clauses…" />;
   }
@@ -56,21 +76,6 @@ export function ClauseExplorerScreen({ documentId }: { documentId: string }) {
       </div>
     );
   }
-
-  const clauseTypes = Array.from(new Set(clauses.map((c) => c.clause_type))).sort();
-
-  const filteredClauses = clauses.filter((c) => {
-    if (filterType !== "all" && c.clause_type !== filterType) return false;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const match =
-        (c.clause_title || "").toLowerCase().includes(q) ||
-        (c.plain_language || "").toLowerCase().includes(q) ||
-        c.original_text.toLowerCase().includes(q);
-      if (!match) return false;
-    }
-    return true;
-  });
 
   return (
     <div className="mx-auto max-w-4xl space-y-8">

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { demoTrackerEntries } from "../api/demo";
 import type { DeadlineTrackerEntry } from "../api/types";
@@ -46,6 +46,12 @@ export function DeadlineTrackerScreen() {
       cancelled = true;
     };
   }, [userId]);
+
+  const sortedEntries = useMemo(() => {
+    return [...entries].sort((a, b) => {
+      return (a.deadline || "").localeCompare(b.deadline || "");
+    });
+  }, [entries]);
 
   const handleDownloadIcs = async (trackerId: string) => {
     setDownloadingId(trackerId);
@@ -118,7 +124,7 @@ export function DeadlineTrackerScreen() {
         />
       ) : (
         <div className="space-y-4">
-          {entries.map((entry) => {
+          {sortedEntries.map((entry) => {
             const daysRemaining = daysUntil(entry.deadline);
             const isUrgent = daysRemaining !== null && daysRemaining <= 7;
             const isOverdue = daysRemaining !== null && daysRemaining < 0;

@@ -1,17 +1,48 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { Suspense, createContext, lazy, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { DocumentRecord } from "./api/types";
 import { DEMO_DOCUMENT_ID, DEMO_USER_ID, demoDocument } from "./api/demo";
 import { AppShell } from "./components/AppShell";
-import { AskDocumentScreen } from "./screens/AskDocument";
-import { ClauseExplorerScreen } from "./screens/ClauseExplorer";
-import { CompareScreen } from "./screens/Compare";
-import { DeadlineTrackerScreen } from "./screens/DeadlineTracker";
-import { DecisionDetailScreen } from "./screens/DecisionDetail";
-import { DecisionRecordScreen } from "./screens/DecisionRecord";
-import { PrepPackViewScreen } from "./screens/PrepPackView";
-import { ResolutionWorkspaceScreen } from "./screens/ResolutionWorkspace";
-import { UploadScreen } from "./screens/Upload";
+
+const AskDocumentScreen = lazy(() =>
+  import("./screens/AskDocument").then((m) => ({ default: m.AskDocumentScreen })),
+);
+const ClauseExplorerScreen = lazy(() =>
+  import("./screens/ClauseExplorer").then((m) => ({ default: m.ClauseExplorerScreen })),
+);
+const CompareScreen = lazy(() =>
+  import("./screens/Compare").then((m) => ({ default: m.CompareScreen })),
+);
+const DeadlineTrackerScreen = lazy(() =>
+  import("./screens/DeadlineTracker").then((m) => ({ default: m.DeadlineTrackerScreen })),
+);
+const DecisionDetailScreen = lazy(() =>
+  import("./screens/DecisionDetail").then((m) => ({ default: m.DecisionDetailScreen })),
+);
+const DecisionRecordScreen = lazy(() =>
+  import("./screens/DecisionRecord").then((m) => ({ default: m.DecisionRecordScreen })),
+);
+const PrepPackViewScreen = lazy(() =>
+  import("./screens/PrepPackView").then((m) => ({ default: m.PrepPackViewScreen })),
+);
+const ResolutionWorkspaceScreen = lazy(() =>
+  import("./screens/ResolutionWorkspace").then((m) => ({ default: m.ResolutionWorkspaceScreen })),
+);
+const UploadScreen = lazy(() =>
+  import("./screens/Upload").then((m) => ({ default: m.UploadScreen })),
+);
+
+function ScreenFallback() {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center py-12" role="status" aria-label="Loading view">
+      <div className="flex items-center gap-3 text-ink/60">
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-pine border-t-transparent" />
+        <span className="text-sm font-medium">Loading view...</span>
+      </div>
+    </div>
+  );
+}
+
 
 const ACTIVE_DOCUMENT_KEY = "wayfinder.active-document";
 const USER_KEY = "wayfinder.user-id";
@@ -146,5 +177,9 @@ export function App() {
     content = <UploadScreen />;
   }
 
-  return <AppShell>{content}</AppShell>;
+  return (
+    <AppShell>
+      <Suspense fallback={<ScreenFallback />}>{content}</Suspense>
+    </AppShell>
+  );
 }
