@@ -1,8 +1,9 @@
+import { memo } from "react";
 import type { DecisionSummary } from "../api/types";
 import { navigate } from "../app";
 import { ConfidenceBadge, Icon, TriageBadge, cx, daysUntil, formatDate } from "./ui";
 
-export function DecisionCard({ decision, index, documentId: _documentId }: { decision: DecisionSummary; index: number; documentId: string }) {
+export const DecisionCard = memo(function DecisionCard({ decision, index, documentId: _documentId }: { decision: DecisionSummary; index: number; documentId: string }) {
   const computedDays = decision.days_remaining ?? daysUntil(decision.deadline);
   const urgent = computedDays !== null && computedDays <= 7;
   const overdue = computedDays !== null && computedDays < 0;
@@ -23,4 +24,5 @@ export function DecisionCard({ decision, index, documentId: _documentId }: { dec
       </div>
     </article>
   );
-}
+});
+

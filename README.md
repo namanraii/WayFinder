@@ -90,6 +90,32 @@ gcloud run deploy wayfinder \
 ```
 
 
+## Resource Efficiency & Performance Architecture
+
+Wayfinder is designed for high computational and memory efficiency, adhering to strict resource utilization best practices:
+
+### 1. Time Complexity & Algorithmic Optimization
+- **Batch Database Operations**: Replaced repetitive single-row queries with bulk `batch_insert` (`conn.executemany`) and batch updates across clause segmentation, graph generation, decision extraction, and deadline syncing, reducing database round-trips from $O(N)$ to $O(1)$.
+- **In-Memory Graph Construction**: Document graph nodes and edges are assembled entirely in memory before two batch insertion passes, eliminating nested $O(N^2)$ SQL lookups.
+- **Compiled Pattern Matching**: All regular expressions for headings, dates, currency, and clause classification are precompiled at module load time rather than inside request loops.
+- **Bounded Text Sampling**: Heuristic classifiers (e.g. language detection) operate on fixed-window prefix samples ($O(1)$ time complexity), preventing processing delays on large legal documents.
+
+### 2. Memory Utilization & Allocation
+- **Thread-Local Connection Pooling**: Reuses one open SQLite connection per worker thread with WAL mode and 256 MB memory-mapped I/O (`PRAGMA mmap_size`), eliminating connection teardown overhead and memory fragmentation.
+- **Paginated Collection APIs**: Endpoints (`/documents/{id}/clauses`, `/documents/{id}/decisions`, `/users/{id}/tracker`) provide `limit` and `offset` query parameters, ensuring bounded memory footprint regardless of document size.
+- **Generator Stream Processing**: `query_iter` yields rows lazily to avoid materializing large query result sets in RAM.
+
+### 3. Multi-Tier Caching
+- **Server-Side In-Memory Cache**: `functools.lru_cache` caches disk prompt templates and clause classification hits.
+- **HTTP Response Caching**: GET endpoints include client-validating `Cache-Control: private, max-age=...` directives and gzip compression middleware.
+- **Client-Side Request Cache**: Frontend API client provides an in-memory TTL query cache to prevent redundant HTTP requests during navigation.
+
+### 4. Frontend Rendering Efficiency
+- **Component Memoization**: List item components (`DecisionCard`, `ClauseItem`, `TrackerRow`) are wrapped in `React.memo` with `useCallback` event handlers to avoid unnecessary React virtual-DOM re-renders.
+- **Code-Splitting & Lazy Loading**: All screen views use `React.lazy()` with route-level chunking, keeping the initial JS bundle payload minimal.
+
+---
+
 ## Safety design
 
 - No jurisdiction is silently assumed. Unknown jurisdiction produces the
@@ -101,3 +127,4 @@ gcloud run deploy wayfinder \
 
 See [the full product specification](docs/wayfinder_full.md) for contracts,
 guardrails, and implementation details.
+

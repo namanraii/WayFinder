@@ -12,14 +12,32 @@ from app.services.repository import load_decision, tracker_from_row
 
 def sync_for_document(conn, document_id: str) -> list[DeadlineTrackerEntry]:
     created = []
-    decisions = sqlite.query(conn, "SELECT decision_id FROM decisions WHERE document_id = ? AND deadline IS NOT NULL", (document_id,))
-    for row in decisions:
-        decision = load_decision(conn, row["decision_id"])
-        if not decision:
-            continue
-        existing = sqlite.query(conn, "SELECT * FROM deadline_tracker WHERE decision_id = ?", (decision.decision_id,))
-        if existing:
-            created.append(tracker_from_row(existing[0]))
+    # Load all decisions with deadlines in one query instead of N individual queries
+    rows = sqlite.query(
+        conn,
+        "SELECT * FROM decisions WHERE document_id = ? AND deadline IS NOT NULL",
+        (document_id,),
+    )
+    if not rows:
+        return []
+
+    from app.services.repository import decision_from_row
+    decisions = [decision_from_row(r) for r in rows]
+
+    # Check all existing trackers in one query
+    dec_ids = [d.decision_id for d in decisions]
+    placeholders = ", ".join("?" for _ in dec_ids)
+    existing_rows = sqlite.query(
+        conn,
+        f"SELECT * FROM deadline_tracker WHERE decision_id IN ({placeholders})",
+        dec_ids,
+    )
+    existing_by_dec = {r["decision_id"]: tracker_from_row(r) for r in existing_rows}
+
+    rows_to_insert: list[dict] = []
+    for decision in decisions:
+        if decision.decision_id in existing_by_dec:
+            created.append(existing_by_dec[decision.decision_id])
             continue
         inaction = next((option for option in decision.options if option.is_default_if_inaction), None)
         action = next((option.action for option in decision.options if not option.is_default_if_inaction), decision.title)
@@ -28,13 +46,17 @@ def sync_for_document(conn, document_id: str) -> list[DeadlineTrackerEntry]:
             deadline=decision.deadline, resolving_action=action,
             inaction_consequence_short=(inaction.consequence[:240] if inaction else None),
         )
-        sqlite.insert(conn, "deadline_tracker", {
+        rows_to_insert.append({
             "tracker_id": entry.tracker_id, "decision_id": entry.decision_id,
             "deadline": entry.deadline, "resolving_action": entry.resolving_action,
             "inaction_consequence_short": entry.inaction_consequence_short,
             "reminder_schedule": entry.reminder_schedule, "status": entry.status,
         })
         created.append(entry)
+
+    if rows_to_insert:
+        sqlite.batch_insert(conn, "deadline_tracker", rows_to_insert)
+
     return created
 
 

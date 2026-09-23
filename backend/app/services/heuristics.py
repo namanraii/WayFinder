@@ -82,11 +82,22 @@ _GOVERNING_LAW_RE = re.compile(
     r"governed by the laws of\s+([A-Z][A-Za-z ,]+)", re.IGNORECASE)
 
 
+from functools import lru_cache
+
+_TYPE_COMPILED: list[tuple[str, list[re.Pattern]]] = [
+    (ctype, [re.compile(k) for k in keywords])
+    for ctype, keywords in _TYPE_KEYWORDS
+]
+
+_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+@lru_cache(maxsize=512)
 def classify_clause(text: str) -> tuple[str, float]:
     low = text.lower()
     best, best_hits = "general", 0
-    for ctype, keywords in _TYPE_KEYWORDS:
-        hits = sum(1 for k in keywords if re.search(k, low))
+    for ctype, patterns in _TYPE_COMPILED:
+        hits = sum(1 for pat in patterns if pat.search(low))
         if hits > best_hits:
             best, best_hits = ctype, hits
     if best == "arbitration_optout" and ("opt out" in low or "opt-out" in low):
@@ -122,7 +133,7 @@ def extract_deadline(text: str) -> Optional[tuple[str, int]]:
 
 
 def consequence_sentences(text: str) -> list[str]:
-    sents = re.split(r"(?<=[.!?])\s+", text.strip())
+    sents = _SENT_SPLIT_RE.split(text.strip())
     return [s.strip() for s in sents
             if any(mk in s.lower() for mk in CONSEQUENCE_MARKERS)]
 
@@ -142,8 +153,9 @@ def detect_governing_law(text: str) -> Optional[str]:
 
 
 def detect_language(text: str) -> str:
-    # MVP heuristic: ASCII-dominant text -> English.
-    ascii_ratio = sum(1 for c in text if ord(c) < 128) / max(len(text), 1)
+    # Bound sample size to 2000 chars for O(1) evaluation on arbitrarily large texts
+    sample = text[:2000]
+    ascii_ratio = sum(1 for c in sample if ord(c) < 128) / max(len(sample), 1)
     return "en" if ascii_ratio > 0.9 else "unknown"
 
 

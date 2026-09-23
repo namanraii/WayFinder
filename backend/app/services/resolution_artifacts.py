@@ -9,13 +9,14 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
 from app.db import sqlite
 from app.llm import guardrails
 from app.llm.orchestrator import LLMOrchestrator
-from app.models import PrepPack, ResolutionArtifact
+from app.models import DecisionPoint, PrepPack, ResolutionArtifact
 from app.services.repository import (
     artifact_from_row,
     load_clauses,
@@ -26,6 +27,11 @@ from app.services.repository import (
 )
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
+
+# Precompiled regexes to avoid re-compilation on every artifact generation
+_FIRST_DATE_ISO = re.compile(r"\b(20\d{2}-\d{2}-\d{2})\b")
+_FIRST_DATE_SLASH = re.compile(r"\b(\d{1,2}[/-]\d{1,2}[/-]20\d{2})\b")
+_MONEY_RE = re.compile(r"(?:₹|\$|USD\s?|INR\s?)[\d,]+(?:\.\d{2})?", re.IGNORECASE)
 
 # Fixed field lists are intentionally kept beside the template IDs.  They are
 # the contract passed to the model and prevent it from filling arbitrary facts.
@@ -47,9 +53,9 @@ class ArtifactGenerationBlocked(PermissionError):
         super().__init__(f"Draft artifact generation is not permitted for tier {triage_tier!r}")
 
 
-def template_for_decision(conn, decision_id: str) -> str:
+def template_for_decision(conn, decision_id: str, decision: Optional[DecisionPoint] = None) -> str:
     """Select a fixed template from document-derived clause types only."""
-    decision = load_decision(conn, decision_id)
+    decision = decision or load_decision(conn, decision_id)
     if decision is None:
         raise KeyError(f"Decision {decision_id!r} was not found")
     clauses = {c.clause_id: c for c in load_clauses(conn, decision.document_id)}
@@ -70,7 +76,9 @@ def template_for_decision(conn, decision_id: str) -> str:
     return "objection_letter_v1"
 
 
+@lru_cache(maxsize=16)
 def _read_template(template_id: str) -> str:
+    """Cached template reader to eliminate repetitive disk I/O."""
     if template_id not in TEMPLATE_FIELDS:
         raise ValueError(f"Unsupported template_id {template_id!r}")
     path = TEMPLATES_DIR / f"{template_id}.txt"
@@ -81,25 +89,25 @@ def _read_template(template_id: str) -> str:
 
 def _first_date(text: str) -> Optional[str]:
     """Find an explicit ISO/slash-style date without inventing a date."""
-    m = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", text)
+    m = _FIRST_DATE_ISO.search(text)
     if m:
         return m.group(1)
-    m = re.search(r"\b(\d{1,2}[/-]\d{1,2}[/-]20\d{2})\b", text)
+    m = _FIRST_DATE_SLASH.search(text)
     return m.group(1) if m else None
 
 
 def _money(text: str) -> Optional[str]:
-    match = re.search(r"(?:₹|\$|USD\s?|INR\s?)[\d,]+(?:\.\d{2})?", text, re.IGNORECASE)
+    match = _MONEY_RE.search(text)
     return match.group(0) if match else None
 
 
-def extract_facts(conn, decision_id: str, option_id: Optional[str] = None) -> dict[str, str]:
+def extract_facts(conn, decision_id: str, option_id: Optional[str] = None, decision: Optional[DecisionPoint] = None) -> dict[str, str]:
     """Extract only document-supported values for a fixed template.
 
     Names and account numbers are intentionally not guessed.  Their bracketed
     placeholders are returned through ``fields_to_fill`` for the user.
     """
-    decision = load_decision(conn, decision_id)
+    decision = decision or load_decision(conn, decision_id)
     if decision is None:
         raise KeyError(f"Decision {decision_id!r} was not found")
     doc = load_document(conn, decision.document_id)
@@ -187,9 +195,9 @@ def generate_artifact(
     if not guardrails.check_tier_gate(decision.triage_tier):
         raise ArtifactGenerationBlocked(decision.triage_tier)
 
-    template_id = template_id or template_for_decision(conn, decision_id)
+    template_id = template_id or template_for_decision(conn, decision_id, decision=decision)
     structure = _read_template(template_id)
-    facts = extract_facts(conn, decision_id, option_id)
+    facts = extract_facts(conn, decision_id, option_id, decision=decision)
     fields = TEMPLATE_FIELDS[template_id]
     artifact_id = f"artifact_{uuid.uuid4().hex[:12]}"
     orchestrator = orchestrator or LLMOrchestrator()

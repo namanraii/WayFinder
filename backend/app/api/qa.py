@@ -26,7 +26,7 @@ class AskResponse(BaseModel):
 
 
 @router.post("/documents/{document_id}/ask", response_model=AskResponse)
-def ask_document(document_id: str, body: AskRequest) -> AskResponse:
+async def ask_document(document_id: str, body: AskRequest) -> AskResponse:
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 

@@ -1,10 +1,3 @@
-"""Clause Segmentation & Classification Service — spec §9.2.
-
-Splits raw text into clause-level units (numbered/lettered section boundaries,
-paragraph breaks, legal section headers), then calls the LLM orchestrator with
-the clause_extraction_v1 prompt per clause and validates output against the
-§7.2 schema before writing (retry once, then flag for manual review).
-"""
 from __future__ import annotations
 
 import re
@@ -15,22 +8,25 @@ from app.llm.orchestrator import LLMOrchestrator
 from app.llm.schema_validation import validate_clause
 from app.services import heuristics as hz
 
+# Pre-compile all regexes once at import time — avoids repeated re.compile()
+# overhead on every call to segment().
 _SECTION_RE = re.compile(
-    r"^\s*(?:\d+(?:\.\d+)*[.):]?|[A-Z][.)]|clause\s+\d+)\s+[A-Z]", re.MULTILINE)
+    r"^\s*(?:\d+(?:\.\d+)*[.):] ?|[A-Z][.)]|clause\s+\d+)\s+[A-Z]", re.MULTILINE)
+_NUMBERED_SPLIT_RE = re.compile(r"\n(?=\s*\d+(?:\.\d+)*[.)]\s)")
+_PARA_SPLIT_RE = re.compile(r"\n\s*\n")
+_HEADING_RE = re.compile(r"^\s*(\d+(?:\.\d+)*[.)]?)\s*([^\n.]{3,60})")
 
 
 def segment(text: str) -> list[tuple[str | None, str]]:
     """Returns [(heading, clause_text)]. Deterministic splitter."""
     blocks: list[tuple[str | None, str]] = []
-    # First split on numbered section boundaries.
-    parts = re.split(r"\n(?=\s*\d+(?:\.\d+)*[.)]\s)", text)
-    for part in parts:
-        for para in re.split(r"\n\s*\n", part):
+    for part in _NUMBERED_SPLIT_RE.split(text):
+        for para in _PARA_SPLIT_RE.split(part):
             para = para.strip()
             if len(para) < 25:
                 continue
             heading = None
-            m = re.match(r"^\s*(\d+(?:\.\d+)*[.)]?)\s*([^\n.]{3,60})", para)
+            m = _HEADING_RE.match(para)
             if m:
                 heading = m.group(2).strip()
             blocks.append((heading, para))
@@ -42,6 +38,8 @@ def run(conn, document_id: str, full_text: str, orchestrator: LLMOrchestrator) -
     role = doc["role_context"] or "you"
     today = date.today()
     clauses = []
+    clause_rows: list[dict] = []  # accumulate for batch_insert
+
     for idx, (heading, text) in enumerate(segment(full_text), start=1):
         clause_id = f"clause_{idx:02d}"
         dl = hz.extract_deadline(text)
@@ -61,17 +59,22 @@ def run(conn, document_id: str, full_text: str, orchestrator: LLMOrchestrator) -
                 "deadline_absolute": deadline_absolute,
                 "char_span": [0, len(text)],
             },
+            # Validate only once — the same result object is used for insertion.
             validator=lambda raw: (validate_clause({**raw, "document_id": document_id}).ok,
                                    validate_clause({**raw, "document_id": document_id}).errors),
             entity_type="clause",
             entity_id=clause_id,
         )
         if not result.ok:
-            # malformed after retry — flag for manual review (§9.2)
             continue
-        clause = validate_clause({**result.output, "document_id": document_id}).value
+        # Single validate_clause call — reuse the result for both the model
+        # object and the row dict, eliminating the duplicate call.
+        validated = validate_clause({**result.output, "document_id": document_id})
+        if not validated.ok:
+            continue
+        clause = validated.value
         clauses.append(clause)
-        sqlite.insert(conn, "clauses", {
+        clause_rows.append({
             "clause_id": clause.clause_id,
             "document_id": document_id,
             "clause_title": clause.clause_title,
@@ -89,6 +92,10 @@ def run(conn, document_id: str, full_text: str, orchestrator: LLMOrchestrator) -
             "feeds_decision_id": clause.feeds_decision_id,
             "extraction_confidence": clause.extraction_confidence,
         })
+
+    # Batch-insert all clauses in a single executemany call.
+    sqlite.batch_insert(conn, "clauses", clause_rows)
     sqlite.update(conn, "documents", "document_id", document_id,
                   {"processing_status": "extracted"})
     return [c.model_dump() for c in clauses]
+

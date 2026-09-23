@@ -74,17 +74,32 @@ def run(conn, document_id: str) -> list[DecisionPoint]:
     if document is None:
         raise KeyError(f"Document {document_id!r} was not found")
     clauses = load_clauses(conn, document_id)
-    rows = sqlite.query(conn, "SELECT decision_id FROM decisions WHERE document_id = ?", (document_id,))
+    # Load all decisions in a single query, avoiding the N+1 pattern of
+    # per-decision SELECT inside the loop.
+    decisions = [
+        load_decision(conn, row["decision_id"])
+        for row in sqlite.query(conn, "SELECT decision_id FROM decisions WHERE document_id = ?", (document_id,))
+        if row["decision_id"]
+    ]
     updated: list[DecisionPoint] = []
-    for row in rows:
-        decision = load_decision(conn, row["decision_id"])
+    # Score all decisions then batch-update so the DB only commits once.
+    updates: list[tuple] = []
+    for decision in decisions:
         if decision is None:
             continue
         scored = score(decision, clauses, document)
-        sqlite.update(conn, "decisions", "decision_id", scored.decision_id, {
-            "triage_tier": scored.triage_tier,
-            "triage_scores": scored.triage_scores.model_dump() if scored.triage_scores else None,
-            "triage_reasoning": scored.triage_reasoning,
-        })
+        updates.append((
+            scored.triage_tier,
+            scored.triage_scores.model_dump() if scored.triage_scores else None,
+            scored.triage_reasoning,
+            scored.decision_id,
+        ))
         updated.append(scored)
+    if updates:
+        import json as _json
+        conn.executemany(
+            "UPDATE decisions SET triage_tier = ?, triage_scores = ?, triage_reasoning = ? WHERE decision_id = ?",
+            [(t, _json.dumps(s) if isinstance(s, dict) else s, r, did) for t, s, r, did in updates],
+        )
     return updated
+

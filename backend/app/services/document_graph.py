@@ -26,75 +26,96 @@ def _eid() -> str:
 
 
 def build(conn, document_id: str, clauses: list[dict]) -> None:
+    nodes_to_insert: list[dict] = []
+    edges_to_insert: list[dict] = []
+
     doc_node = _nid("docnode")
-    sqlite.insert(conn, "graph_nodes", {
+    nodes_to_insert.append({
         "node_id": doc_node, "document_id": document_id,
         "node_type": "document", "ref_id": document_id, "properties": {},
     })
 
-    deadline_nodes: list[str] = []
-    penalty_nodes: list[str] = []
+    clause_cnode: dict[str, str] = {}
+    clause_deadlines: dict[str, list[str]] = {}
+    clause_penalties: dict[str, list[str]] = {}
 
     for clause in clauses:
+        cid = clause["clause_id"]
         c_node = _nid("cnode")
-        sqlite.insert(conn, "graph_nodes", {
+        clause_cnode[cid] = c_node
+        clause_deadlines[cid] = []
+        clause_penalties[cid] = []
+
+        nodes_to_insert.append({
             "node_id": c_node, "document_id": document_id,
-            "node_type": "clause", "ref_id": clause["clause_id"],
+            "node_type": "clause", "ref_id": cid,
             "properties": {"clause_type": clause["clause_type"],
                            "title": clause.get("clause_title")},
         })
 
         for ob in clause.get("obligations") or []:
             o_node = _nid("onode")
-            sqlite.insert(conn, "graph_nodes", {
+            nodes_to_insert.append({
                 "node_id": o_node, "document_id": document_id,
-                "node_type": "obligation", "ref_id": clause["clause_id"],
+                "node_type": "obligation", "ref_id": cid,
                 "properties": ob,
             })
-            _edge(conn, document_id, c_node, o_node, "imposes")
+            edges_to_insert.append({
+                "edge_id": _eid(), "document_id": document_id,
+                "from_node_id": c_node, "to_node_id": o_node, "edge_type": "imposes",
+            })
             if ob.get("deadline_absolute") or ob.get("deadline_relative"):
                 d_node = _nid("dnode")
-                sqlite.insert(conn, "graph_nodes", {
+                nodes_to_insert.append({
                     "node_id": d_node, "document_id": document_id,
-                    "node_type": "deadline", "ref_id": clause["clause_id"],
+                    "node_type": "deadline", "ref_id": cid,
                     "properties": {
                         "deadline_absolute": ob.get("deadline_absolute"),
                         "deadline_relative": ob.get("deadline_relative"),
                     },
                 })
-                _edge(conn, document_id, o_node, d_node, "resolves")
-                deadline_nodes.append(d_node)
+                edges_to_insert.append({
+                    "edge_id": _eid(), "document_id": document_id,
+                    "from_node_id": o_node, "to_node_id": d_node, "edge_type": "resolves",
+                })
+                clause_deadlines[cid].append(d_node)
 
         cons = hz.consequence_sentences(clause.get("original_text", ""))
         for sent in cons:
             p_node = _nid("pnode")
-            sqlite.insert(conn, "graph_nodes", {
+            nodes_to_insert.append({
                 "node_id": p_node, "document_id": document_id,
-                "node_type": "penalty", "ref_id": clause["clause_id"],
+                "node_type": "penalty", "ref_id": cid,
                 "properties": {"text": sent,
-                               "source_clause_id": clause["clause_id"],
+                               "source_clause_id": cid,
                                "char_span": clause.get("char_span")},
             })
-            penalty_nodes.append(p_node)
+            clause_penalties[cid].append(p_node)
 
-    # 'triggers' edges: each deadline in a clause triggers the penalties
-    # stated in the SAME clause (consequence sentences are co-located).
-    for clause in clauses:
-        c_dls = _nodes_for(conn, document_id, "deadline", clause["clause_id"])
-        c_pens = _nodes_for(conn, document_id, "penalty", clause["clause_id"])
-        for d in c_dls:
-            for p in c_pens:
-                _edge(conn, document_id, d["node_id"], p["node_id"], "triggers")
+    # 'triggers' edges: built directly in memory without redundant DB queries
+    for cid in clause_cnode:
+        for d_node in clause_deadlines[cid]:
+            for p_node in clause_penalties[cid]:
+                edges_to_insert.append({
+                    "edge_id": _eid(), "document_id": document_id,
+                    "from_node_id": d_node, "to_node_id": p_node, "edge_type": "triggers",
+                })
 
-    # 'references' edges between clauses that share decision-bearing type
-    # signals (e.g. notice_period <-> termination) for candidate merging.
+    # 'references' edges: built directly from in-memory lookup table
     for i, a in enumerate(clauses):
         for b in clauses[i + 1:]:
             if {a["clause_type"], b["clause_type"]} <= hz.DECISION_BEARING_TYPES:
-                a_node = _node_of_clause(conn, document_id, a["clause_id"])
-                b_node = _node_of_clause(conn, document_id, b["clause_id"])
-                if a_node and b_node:
-                    _edge(conn, document_id, a_node["node_id"], b_node["node_id"], "references")
+                a_nid = clause_cnode.get(a["clause_id"])
+                b_nid = clause_cnode.get(b["clause_id"])
+                if a_nid and b_nid:
+                    edges_to_insert.append({
+                        "edge_id": _eid(), "document_id": document_id,
+                        "from_node_id": a_nid, "to_node_id": b_nid, "edge_type": "references",
+                    })
+
+    # Batch insert all nodes and edges in two single calls (O(1) round trips)
+    sqlite.batch_insert(conn, "graph_nodes", nodes_to_insert)
+    sqlite.batch_insert(conn, "graph_edges", edges_to_insert)
 
     sqlite.update(conn, "documents", "document_id", document_id,
                   {"processing_status": "graphed"})

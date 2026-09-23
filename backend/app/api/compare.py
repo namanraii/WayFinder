@@ -18,7 +18,7 @@ class CompareRequest(BaseModel):
 
 
 @router.post("/documents/compare", response_model=ComparisonResult)
-def compare_documents(body: CompareRequest) -> ComparisonResult:
+async def compare_documents(body: CompareRequest) -> ComparisonResult:
     with sqlite.connect() as conn:
         doc_a = load_document(conn, body.document_id_a)
         if not doc_a:

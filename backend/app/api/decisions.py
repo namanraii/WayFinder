@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from app.db import sqlite
@@ -20,7 +20,8 @@ class ResolveRequest(BaseModel):
 
 
 @router.get("/decisions/{decision_id}", response_model=DecisionPoint)
-def get_decision(decision_id: str) -> DecisionPoint:
+async def get_decision(decision_id: str, response: Response) -> DecisionPoint:
+    response.headers["Cache-Control"] = "private, max-age=60"
     with sqlite.connect() as conn:
         decision = load_decision(conn, decision_id)
         if not decision:
@@ -29,7 +30,7 @@ def get_decision(decision_id: str) -> DecisionPoint:
 
 
 @router.post("/decisions/{decision_id}/resolve", response_model=ResolutionArtifact)
-def resolve_decision(decision_id: str, body: Optional[ResolveRequest] = None) -> ResolutionArtifact:
+async def resolve_decision(decision_id: str, body: Optional[ResolveRequest] = None) -> ResolutionArtifact:
     with sqlite.connect() as conn:
         decision = load_decision(conn, decision_id)
         if not decision:
@@ -63,7 +64,7 @@ def resolve_decision(decision_id: str, body: Optional[ResolveRequest] = None) ->
 
 
 @router.post("/decisions/{decision_id}/prep-pack", response_model=PrepPack)
-def get_or_create_prep_pack(decision_id: str) -> PrepPack:
+async def get_or_create_prep_pack(decision_id: str) -> PrepPack:
     with sqlite.connect() as conn:
         decision = load_decision(conn, decision_id)
         if not decision:

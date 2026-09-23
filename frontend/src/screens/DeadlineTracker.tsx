@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { demoTrackerEntries } from "../api/demo";
 import type { DeadlineTrackerEntry } from "../api/types";
@@ -13,6 +13,73 @@ import {
   daysUntil,
   formatDate,
 } from "../components/ui";
+
+const TrackerRow = memo(function TrackerRow({
+  entry,
+  isDownloading,
+  onDownloadIcs,
+}: {
+  entry: DeadlineTrackerEntry;
+  isDownloading: boolean;
+  onDownloadIcs: (trackerId: string) => void;
+}) {
+  const daysRemaining = daysUntil(entry.deadline);
+  const isUrgent = daysRemaining !== null && daysRemaining <= 7 && daysRemaining >= 0;
+  const isOverdue = daysRemaining !== null && daysRemaining < 0;
+
+  return (
+    <article className="rounded-2xl border border-ink/10 bg-white p-6 shadow-card flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="space-y-2 max-w-xl">
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`badge ${
+              isOverdue ? "badge-danger" : isUrgent ? "badge-danger" : "badge-safe"
+            }`}
+          >
+            <Icon name="clock" className="h-3 w-3 mr-1" />
+            {isOverdue ? "Passed" : isUrgent ? "Due Soon" : "Open"} ·{" "}
+            {formatDate(entry.deadline)}
+            {daysRemaining !== null &&
+              ` (${isOverdue ? `${Math.abs(daysRemaining)}d ago` : `${daysRemaining}d left`})`}
+          </span>
+          <span className="badge badge-neutral">
+            Reminders: {entry.reminder_schedule.join(", ")}
+          </span>
+        </div>
+
+        <h3 className="font-display text-lg font-bold text-ink">
+          {entry.resolving_action || "Required Action"}
+        </h3>
+
+        {entry.inaction_consequence_short && (
+          <p className="text-xs text-red-900/90 bg-red-50/80 p-2.5 rounded-lg border border-red-200/50">
+            <strong>If missed:</strong> {entry.inaction_consequence_short}
+          </p>
+        )}
+      </div>
+
+      <div className="flex sm:flex-col gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={() => onDownloadIcs(entry.tracker_id)}
+          disabled={isDownloading}
+          className="button button-secondary button-small gap-1.5"
+        >
+          <Icon name="calendar" className="h-3.5 w-3.5" />
+          {isDownloading ? "Exporting…" : "Add to Calendar (.ics)"}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate(`/decisions/${entry.decision_id}`)}
+          className="button button-primary button-small gap-1.5"
+        >
+          View options →
+        </button>
+      </div>
+    </article>
+  );
+});
 
 export function DeadlineTrackerScreen() {
   const { userId } = useWayfinder();
@@ -32,7 +99,6 @@ export function DeadlineTrackerScreen() {
         const data = await api.getTracker(userId);
         if (!cancelled) setEntries(data);
       } catch (err: unknown) {
-        // Fallback to demo tracker
         if (!cancelled) {
           setEntries(demoTrackerEntries);
         }
@@ -53,7 +119,7 @@ export function DeadlineTrackerScreen() {
     });
   }, [entries]);
 
-  const handleDownloadIcs = async (trackerId: string) => {
+  const handleDownloadIcs = useCallback(async (trackerId: string) => {
     setDownloadingId(trackerId);
     try {
       const blob = await api.downloadCalendar(trackerId);
@@ -64,7 +130,6 @@ export function DeadlineTrackerScreen() {
       a.click();
       URL.revokeObjectURL(url);
     } catch {
-      // If backend export fails, generate a client-side ICS blob as fallback
       const entry = entries.find((e) => e.tracker_id === trackerId);
       if (entry) {
         const dateVal = entry.deadline.replace(/-/g, "");
@@ -91,7 +156,7 @@ export function DeadlineTrackerScreen() {
     } finally {
       setDownloadingId(null);
     }
-  };
+  }, [entries]);
 
   if (isLoading) {
     return <LoadingState label="Loading your tracked deadlines…" />;
@@ -124,67 +189,14 @@ export function DeadlineTrackerScreen() {
         />
       ) : (
         <div className="space-y-4">
-          {sortedEntries.map((entry) => {
-            const daysRemaining = daysUntil(entry.deadline);
-            const isUrgent = daysRemaining !== null && daysRemaining <= 7;
-            const isOverdue = daysRemaining !== null && daysRemaining < 0;
-
-            return (
-              <article
-                key={entry.tracker_id}
-                className="rounded-2xl border border-ink/10 bg-white p-6 shadow-card flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="space-y-2 max-w-xl">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`badge ${
-                        isOverdue ? "badge-danger" : isUrgent ? "badge-danger" : "badge-safe"
-                      }`}
-                    >
-                      <Icon name="clock" className="h-3 w-3 mr-1" />
-                      {isOverdue ? "Passed" : isUrgent ? "Due Soon" : "Open"} ·{" "}
-                      {formatDate(entry.deadline)}
-                      {daysRemaining !== null &&
-                        ` (${isOverdue ? `${Math.abs(daysRemaining)}d ago` : `${daysRemaining}d left`})`}
-                    </span>
-                    <span className="badge badge-neutral">
-                      Reminders: {entry.reminder_schedule.join(", ")}
-                    </span>
-                  </div>
-
-                  <h3 className="font-display text-lg font-bold text-ink">
-                    {entry.resolving_action || "Required Action"}
-                  </h3>
-
-                  {entry.inaction_consequence_short && (
-                    <p className="text-xs text-red-900/90 bg-red-50/80 p-2.5 rounded-lg border border-red-200/50">
-                      <strong>If missed:</strong> {entry.inaction_consequence_short}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex sm:flex-col gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleDownloadIcs(entry.tracker_id)}
-                    disabled={downloadingId === entry.tracker_id}
-                    className="button button-secondary button-small gap-1.5"
-                  >
-                    <Icon name="calendar" className="h-3.5 w-3.5" />
-                    {downloadingId === entry.tracker_id ? "Exporting…" : "Add to Calendar (.ics)"}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/decisions/${entry.decision_id}`)}
-                    className="button button-primary button-small gap-1.5"
-                  >
-                    View options →
-                  </button>
-                </div>
-              </article>
-            );
-          })}
+          {sortedEntries.map((entry) => (
+            <TrackerRow
+              key={entry.tracker_id}
+              entry={entry}
+              isDownloading={downloadingId === entry.tracker_id}
+              onDownloadIcs={handleDownloadIcs}
+            />
+          ))}
         </div>
       )}
 

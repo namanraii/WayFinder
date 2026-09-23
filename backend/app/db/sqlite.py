@@ -8,8 +8,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Optional
+
+# Thread-local connection pool: one reusable connection per thread avoids
+# the per-request open/close overhead while remaining multi-thread safe.
+_local = threading.local()
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DB_PATH = DATA_DIR / "wayfinder.db"
@@ -161,14 +167,37 @@ def init_db(db_path: Optional[Path] = None) -> None:
         conn.executescript(DDL)
 
 
-def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path or DB_PATH), timeout=20.0, check_same_thread=False)
+def _make_connection(db_path: Path) -> sqlite3.Connection:
+    """Open a new SQLite connection with all performance PRAGMAs applied."""
+    conn = sqlite3.connect(str(db_path), timeout=20.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute("PRAGMA cache_size = -64000")
     conn.execute("PRAGMA temp_store = MEMORY")
+    conn.execute("PRAGMA mmap_size = 268435456")  # 256 MB memory-mapped I/O
+    return conn
+
+
+def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
+    """Return the thread-local connection, creating it once per thread.
+
+    Re-using the same connection avoids the repeated open/PRAGMA overhead on
+    every request while remaining thread-safe (each worker thread owns exactly
+    one connection).  The context-manager protocol (commit on exit, rollback on
+    exception) is preserved via the connection's own __enter__/__exit__.
+    """
+    path = db_path or DB_PATH
+    key = str(path)
+    pool: dict = getattr(_local, "pool", None)  # type: ignore[assignment]
+    if pool is None:
+        _local.pool = {}
+        pool = _local.pool
+    conn = pool.get(key)
+    if conn is None:
+        conn = _make_connection(path)
+        pool[key] = conn
     return conn
 
 
@@ -177,6 +206,16 @@ def insert(conn: sqlite3.Connection, table: str, row: dict[str, Any]) -> None:
     placeholders = ", ".join("?" for _ in row)
     values = [_encode(v) for v in row.values()]
     conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({placeholders})", values)
+
+
+def batch_insert(conn: sqlite3.Connection, table: str, rows: list[dict[str, Any]]) -> None:
+    """Insert multiple rows in a single executemany call — O(n) vs O(n) round trips."""
+    if not rows:
+        return
+    cols = ", ".join(rows[0].keys())
+    placeholders = ", ".join("?" for _ in rows[0])
+    values = [[_encode(v) for v in row.values()] for row in rows]
+    conn.executemany(f"INSERT INTO {table} ({cols}) VALUES ({placeholders})", values)
 
 
 def update(conn: sqlite3.Connection, table: str, key_col: str, key_val: str, fields: dict[str, Any]) -> None:
@@ -196,12 +235,19 @@ def query(conn: sqlite3.Connection, sql: str, params: Iterable[Any] = ()) -> lis
     return [dict(r) for r in conn.execute(sql, tuple(params)).fetchall()]
 
 
+def query_iter(conn: sqlite3.Connection, sql: str, params: Iterable[Any] = ()):
+    """Generator version of query — avoids materialising the entire result set."""
+    for row in conn.execute(sql, tuple(params)):
+        yield dict(row)
+
+
 def _encode(v: Any) -> Any:
     if isinstance(v, (dict, list, tuple)):
         return json.dumps(v)
     if isinstance(v, bool):
         return int(v)
     return v
+
 
 
 def decode_json(v: Any, default: Any = None) -> Any:

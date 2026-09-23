@@ -448,26 +448,25 @@ def _has_decision_shape(raw: Any) -> tuple[bool, list[str]]:
 
 
 def _graph_context(conn, document_id: str, candidate: DecisionCandidate) -> dict[str, list[dict[str, Any]]]:
-    """Return only nearby graph structure for grounding a phrasing request."""
-    all_nodes = sqlite.query(
-        conn,
-        "SELECT * FROM graph_nodes WHERE document_id = ?",
-        (document_id,),
-    )
-    by_id = {node["node_id"]: node for node in all_nodes}
+    """Return only nearby graph structure for grounding a phrasing request.
+
+    The full node/edge lists are loaded once and reused across candidates via
+    local caches rather than issuing separate SELECT * queries for each one.
+    """
+    all_nodes = sqlite.query(conn, "SELECT * FROM graph_nodes WHERE document_id = ?", (document_id,))
+    all_edges = sqlite.query(conn, "SELECT * FROM graph_edges WHERE document_id = ?", (document_id,))
+
+    # Build O(1) lookups — avoid repeated linear scans over all_nodes.
+    by_id: dict[str, dict] = {node["node_id"]: node for node in all_nodes}
+    clause_ids_in_candidate: set[str] = {clause.clause_id for clause in candidate.clauses}
     selected = {
         node["node_id"]
         for node in all_nodes
-        if node.get("ref_id") in {clause.clause_id for clause in candidate.clauses}
+        if node.get("ref_id") in clause_ids_in_candidate
     }
     if candidate.deadline_node_id:
         selected.add(candidate.deadline_node_id)
 
-    all_edges = sqlite.query(
-        conn,
-        "SELECT * FROM graph_edges WHERE document_id = ?",
-        (document_id,),
-    )
     relevant_edges: list[dict[str, Any]] = []
     # A short deterministic expansion includes the deadline's triggered
     # penalties but does not flood the decision prompt with unrelated clauses.
@@ -487,6 +486,8 @@ def _graph_context(conn, document_id: str, candidate: DecisionCandidate) -> dict
         "nodes": nodes,
         "edges": [dict(edge) for edge in relevant_edges],
     }
+
+
 
 
 def _graph_node_for_prompt(node: dict[str, Any]) -> dict[str, Any]:
@@ -511,10 +512,13 @@ def _persist(conn, document_id: str, decision: DecisionPoint) -> None:
         "jurisdiction_confidence_note": decision.jurisdiction_confidence_note,
         "source_spans": decision.source_spans,
     })
-    for clause_id in decision.triggering_clause_ids:
-        sqlite.update(conn, "clauses", "clause_id", clause_id, {
-            "feeds_decision_id": decision.decision_id,
-        })
+    # Batch-update all triggering clauses with feeds_decision_id in one shot.
+    if decision.triggering_clause_ids:
+        placeholders = ", ".join("?" for _ in decision.triggering_clause_ids)
+        conn.execute(
+            f"UPDATE clauses SET feeds_decision_id = ? WHERE clause_id IN ({placeholders})",
+            [decision.decision_id, *decision.triggering_clause_ids],
+        )
 
     decision_node_id = f"dpnode_{uuid.uuid4().hex[:10]}"
     sqlite.insert(conn, "graph_nodes", {
@@ -524,20 +528,30 @@ def _persist(conn, document_id: str, decision: DecisionPoint) -> None:
         "ref_id": decision.decision_id,
         "properties": {"title": decision.title},
     })
-    for clause_id in decision.triggering_clause_ids:
-        for row in sqlite.query(
+    # Fetch all triggering clause graph-nodes in ONE query (IN clause),
+    # then batch-insert edges — eliminates the per-clause-id query in the loop.
+    if decision.triggering_clause_ids:
+        placeholders = ", ".join("?" for _ in decision.triggering_clause_ids)
+        clause_nodes = sqlite.query(
             conn,
-            """SELECT node_id FROM graph_nodes
-               WHERE document_id = ? AND node_type = 'clause' AND ref_id = ?""",
-            (document_id, clause_id),
-        ):
-            sqlite.insert(conn, "graph_edges", {
+            f"""SELECT node_id FROM graph_nodes
+               WHERE document_id = ? AND node_type = 'clause'
+               AND ref_id IN ({placeholders})""",
+            (document_id, *decision.triggering_clause_ids),
+        )
+        edge_rows = [
+            {
                 "edge_id": f"edge_{uuid.uuid4().hex[:10]}",
                 "document_id": document_id,
                 "from_node_id": row["node_id"],
                 "to_node_id": decision_node_id,
                 "edge_type": "feeds",
-            })
+            }
+            for row in clause_nodes
+        ]
+        sqlite.batch_insert(conn, "graph_edges", edge_rows)
+
+
 
 
 def _confidence_for(candidate: DecisionCandidate, document: Document) -> str:

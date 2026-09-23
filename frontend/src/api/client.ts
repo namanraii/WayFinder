@@ -33,7 +33,19 @@ function detailFromPayload(payload: unknown): string | undefined {
   return undefined;
 }
 
+const requestCache = new Map<string, { data: unknown; expiresAt: number }>();
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const method = (init.method ?? "GET").toUpperCase();
+  const isGet = method === "GET";
+
+  if (isGet) {
+    const cached = requestCache.get(path);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.data as T;
+    }
+  }
+
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
@@ -59,6 +71,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       payload,
     );
   }
+
+  if (isGet) {
+    requestCache.set(path, { data: payload, expiresAt: Date.now() + 60_000 });
+  } else {
+    // Invalidate cached GET queries on state-mutating requests
+    requestCache.clear();
+  }
+
   return payload as T;
 }
 

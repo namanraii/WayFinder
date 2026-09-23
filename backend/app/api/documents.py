@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 
 from app.db import sqlite
 from app.models import Clause, DecisionListResponse, DecisionSummary, Document
@@ -93,7 +93,8 @@ async def upload_document(
 
 
 @router.get("/documents/{document_id}", response_model=Document)
-def get_document(document_id: str) -> Document:
+async def get_document(document_id: str, response: Response) -> Document:
+    response.headers["Cache-Control"] = "private, max-age=120"
     with sqlite.connect() as conn:
         doc = load_document(conn, document_id)
         if not doc:
@@ -102,16 +103,32 @@ def get_document(document_id: str) -> Document:
 
 
 @router.get("/documents/{document_id}/clauses", response_model=List[Clause])
-def get_document_clauses(document_id: str) -> List[Clause]:
+async def get_document_clauses(
+    document_id: str,
+    response: Response,
+    limit: Optional[int] = Query(None, ge=1, le=500, description="Max clauses to return"),
+    offset: int = Query(0, ge=0, description="Clause offset for pagination"),
+) -> List[Clause]:
+    response.headers["Cache-Control"] = "private, max-age=60"
     with sqlite.connect() as conn:
         doc = load_document(conn, document_id)
         if not doc:
             raise HTTPException(status_code=404, detail=f"Document {document_id!r} not found")
-        return load_clauses(conn, document_id)
+        clauses = load_clauses(conn, document_id)
+        if offset > 0 or limit is not None:
+            end = (offset + limit) if limit is not None else len(clauses)
+            return clauses[offset:end]
+        return clauses
 
 
 @router.get("/documents/{document_id}/decisions", response_model=DecisionListResponse)
-def get_document_decisions(document_id: str) -> DecisionListResponse:
+async def get_document_decisions(
+    document_id: str,
+    response: Response,
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Max decisions to return"),
+    offset: int = Query(0, ge=0, description="Decision offset for pagination"),
+) -> DecisionListResponse:
+    response.headers["Cache-Control"] = "private, max-age=60"
     with sqlite.connect() as conn:
         doc = load_document(conn, document_id)
         if not doc:
@@ -128,8 +145,12 @@ def get_document_decisions(document_id: str) -> DecisionListResponse:
             )
             for d in decisions
         ]
+        if offset > 0 or limit is not None:
+            end = (offset + limit) if limit is not None else len(summaries)
+            summaries = summaries[offset:end]
         return DecisionListResponse(
             document_id=doc.document_id,
             processing_status=doc.processing_status,
             decisions=summaries,
         )
+

@@ -13,6 +13,7 @@ import json
 import os
 import uuid
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -20,6 +21,13 @@ from app.db import sqlite
 from app.llm import guardrails
 
 PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
+
+
+@lru_cache(maxsize=64)
+def _load_prompt_cached(prompt_name: str) -> str:
+    """Read and cache prompt file contents — avoids repeated disk I/O per request."""
+    path = PROMPTS_DIR / f"{prompt_name}.txt"
+    return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
 @dataclass
@@ -44,8 +52,8 @@ class LLMOrchestrator:
         self.audit = audit
 
     def load_prompt(self, prompt_name: str) -> str:
-        path = PROMPTS_DIR / f"{prompt_name}.txt"
-        return path.read_text(encoding="utf-8") if path.exists() else ""
+        """Return cached prompt text — first call reads disk, subsequent calls are O(1)."""
+        return _load_prompt_cached(prompt_name)
 
     def generate(
         self,
@@ -104,14 +112,18 @@ class LLMOrchestrator:
         if not self.audit:
             return
         try:
-            with sqlite.connect() as conn:
-                sqlite.insert(conn, "generation_audit_log", {
-                    "audit_id": f"aud_{uuid.uuid4().hex[:10]}",
-                    "entity_type": entity_type,
-                    "entity_id": entity_id,
-                    "model_version": self.model_version,
-                    "prompt_version": prompt_version,
-                    "guardrail_checks_passed": checks,
-                })
+            # Reuse the thread-local connection — avoids opening a new
+            # connection for every audit log entry during pipeline runs.
+            conn = sqlite.connect()
+            sqlite.insert(conn, "generation_audit_log", {
+                "audit_id": f"aud_{uuid.uuid4().hex[:10]}",
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "model_version": self.model_version,
+                "prompt_version": prompt_version,
+                "guardrail_checks_passed": checks,
+            })
+            conn.commit()
         except Exception:
             pass  # audit failure must never crash a generation path
+
